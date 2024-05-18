@@ -42,7 +42,7 @@ resource "aws_security_group" "albsg" {
     from_port   = 0
     to_port     = 0
     protocol    = -1
-    cidr_blocks = "0.0.0.0/0"
+    cidr_blocks = ["0.0.0.0/0"]
   }
 }
 
@@ -76,4 +76,39 @@ resource "aws_alb_listener" "listener1" {
   port       = 80
   protocol   = "HTTP"
   depends_on = [aws_alb.alb1, aws_alb_target_group.tg1]
+}
+
+// launch template
+resource "aws_launch_template" "lt1" {
+  image_id               = "ami-0cbe318e714fc9a82"
+  instance_type          = "t2.micro"
+  name                   = "myfirstlt"
+  vpc_security_group_ids = [aws_security_group.albsg.id]
+  depends_on             = [aws_security_group.albsg]
+  user_data = base64encode(
+    <<-EOF
+    #!/bin/bash
+    sudo yum install httpd* -y 
+    sudo systemctl start httpd
+    sudo systemctl enable httpd
+    sudo systemctl restart httpd
+    echo "Hi I am $HOSTNAME" >> /var/www/html/index.html
+    EOF
+  )
+}
+
+// asg config
+resource "aws_autoscaling_group" "asg1" {
+  name             = "ASG1"
+  max_size         = 5
+  min_size         = 1
+  desired_capacity = 2
+  launch_template {
+    id      = aws_launch_template.lt1.id
+    version = aws_launch_template.lt1.latest_version
+  }
+  health_check_type   = "ELB"
+  vpc_zone_identifier = [data.aws_subnet.defsubnet1.id, data.aws_subnet.defsubnet2.id]
+  target_group_arns   = [aws_alb_target_group.tg1.arn]
+  depends_on          = [aws_launch_template.lt1, aws_alb_target_group.tg1]
 }
